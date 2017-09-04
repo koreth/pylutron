@@ -82,6 +82,7 @@ class LutronConnection(threading.Thread):
 
     self.send("#MONITORING,12,2")
     self.send("#MONITORING,255,2")
+    self.send("#MONITORING,3,1")
     self.send("#MONITORING,4,1")
     self.send("#MONITORING,5,1")
     self.send("#MONITORING,6,1")
@@ -545,6 +546,8 @@ class Button(object):
     self._num = num
     self._button_type = button_type
     self._direction = direction
+    self._listeners = []
+    self._lock = threading.Lock()
 
   def __str__(self):
     """Pretty printed string value of the Button object."""
@@ -570,6 +573,20 @@ class Button(object):
     """Returns the button type (Toggle, MasterRaiseLower, etc.)."""
     return self._button_type
 
+  def handle_update(self, action, params):
+    """The callback invoked by the keypad if there's an event for this button."""
+    _LOGGER.info("Updating %d(%s): a=%d params=%s" % (
+        self._num, self._name, action, params))
+    for listener in self._listeners:
+      listener(self, action == 3)
+    return True
+
+  def add_listener(self, callback):
+    """Adds a callback function to listen for events from this button.
+    Callbacks are invoked with two parameters: this button and a boolean
+    indicating whether this the button was pressed (True) or released (False)."""
+    self._listeners.append(callback)
+
 
 class Keypad(LutronEntity):
   """Object representing a Lutron keypad.
@@ -582,18 +599,18 @@ class Keypad(LutronEntity):
   def __init__(self, lutron, name, integration_id):
     """Initializes the Keypad object."""
     super(Keypad, self).__init__(lutron, name, integration_id)
-    self._buttons = []
+    self._buttons = {}
     self._lutron.register_id(Keypad.CMD_TYPE, self)
 
   def add_button(self, button):
     """Adds a button that's part of this keypad. We'll use this to
     dispatch button events."""
-    self._buttons.append(button)
+    self._buttons[button.number] = button
 
   @property
   def buttons(self):
     """Return a tuple of buttons for this keypad."""
-    return tuple(button for button in self._buttons)
+    return tuple(button for button in self._buttons.values())
 
   def handle_update(self, args):
     """The callback invoked by the main event loop if there's an event from this keypad."""
@@ -602,6 +619,8 @@ class Keypad(LutronEntity):
     params = [int(x) for x in args[2:]]
     _LOGGER.debug("Updating %d(%s): c=%d a=%d params=%s" % (
         self._integration_id, self._name, component, action, params))
+    if component in self._buttons:
+      return self._buttons[component].handle_update(action, params)
     return True
 
 
